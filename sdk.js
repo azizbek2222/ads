@@ -1,8 +1,6 @@
-// Firebase modullarini CDN orqali import qilish
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, get, update, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-// Firebase konfiguratsiyasi (Sizning loyihangiz ma'lumotlari)
 const firebaseConfig = {
   apiKey: "AIzaSyDdDnuUlqaHyMYc0vKOmjLFxFSTmWh3gIw",
   authDomain: "sample-firebase-ai-app-955f2.firebaseapp.com",
@@ -13,122 +11,88 @@ const firebaseConfig = {
   appId: "1:310796131581:web:8cb51b40c06bb83e94f294"
 };
 
-// Firebase-ni ishga tushirish
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 class AdsGramSDK {
     constructor() {
-        // Skript tegidan data-app-id ni qidirish
         const scriptTag = document.querySelector('script[data-app-id]');
         this.appId = scriptTag ? scriptTag.getAttribute('data-app-id') : null;
         this.publisherId = null;
-        console.log("AdsGram SDK yuklandi. App ID:", this.appId);
     }
 
-    async showAd(containerId) {
-        if (!this.appId) {
-            console.error("AdsGram: data-app-id topilmadi!");
-            return;
-        }
+    async showInterstitial(seconds = 5) {
+        if (!this.appId) return console.error("AdsGram: App ID topilmadi!");
 
-        const container = document.getElementById(containerId);
-        if (!container) {
-            console.error(`AdsGram: '${containerId}' ID-li element topilmadi!`);
-            return;
-        }
+        const appSnap = await get(ref(db, `publisher_apps/${this.appId}`));
+        if (!appSnap.exists()) return;
+        this.publisherId = appSnap.val().ownerId;
 
-        try {
-            // 1. Nashriyotchi (Publisher) ID-sini olish
-            const appSnap = await get(ref(db, `publisher_apps/${this.appId}`));
-            if (!appSnap.exists()) {
-                console.error("AdsGram: Noto'g'ri App ID!");
-                return;
-            }
-            this.publisherId = appSnap.val().ownerId;
+        const adsSnap = await get(ref(db, 'ads'));
+        const adsData = adsSnap.val();
+        if (!adsData) return;
 
-            // 2. Aktiv reklamalarni bazadan olish
-            const adsSnap = await get(ref(db, 'ads'));
-            const adsData = adsSnap.val();
-            
-            if (!adsData) {
-                container.innerHTML = "<p>Hozircha reklamalar mavjud emas.</p>";
-                return;
-            }
+        const activeAds = Object.keys(adsData).filter(id => adsData[id].status === 'active' && adsData[id].budget > 0);
+        if (activeAds.length === 0) return;
 
-            // Aktiv va byudjeti bor reklamalarni filtrlash
-            const activeAds = Object.keys(adsData).filter(id => 
-                adsData[id].status === 'active' && adsData[id].budget > 0
-            );
+        const randomId = activeAds[Math.floor(Math.random() * activeAds.length)];
+        const ad = adsData[randomId];
 
-            if (activeAds.length === 0) {
-                container.innerHTML = "<p>Aktiv reklamalar tugagan.</p>";
-                return;
-            }
+        // To'liq ekranli overlay yaratish
+        const overlay = document.createElement('div');
+        overlay.id = 'adsgram-overlay';
+        overlay.style = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 10000;
+            display: flex; align-items: center; justify-content: center;
+            font-family: sans-serif;
+        `;
 
-            // Tasodifiy bitta reklamani tanlash
-            const randomId = activeAds[Math.floor(Math.random() * activeAds.length)];
-            const ad = adsData[randomId];
-
-            // 3. Reklamani HTML-ga chiqarish
-            container.innerHTML = `
-                <div id="adsgram-banner" style="
-                    border: 1px solid #ddd; 
-                    border-radius: 12px; 
-                    overflow: hidden; 
-                    max-width: 350px; 
-                    font-family: Arial, sans-serif; 
-                    background: #fff;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                ">
-                    <img src="${ad.image}" style="width: 100%; height: 180px; object-fit: cover;">
-                    <div style="padding: 15px;">
-                        <h4 style="margin: 0 0 10px; color: #333;">${ad.title}</h4>
-                        <a href="${ad.url}" target="_blank" id="ad-cta-btn" style="
-                            display: block; 
-                            background: #0088cc; 
-                            color: white; 
-                            text-align: center; 
-                            padding: 10px; 
-                            text-decoration: none; 
-                            border-radius: 8px;
-                            font-weight: bold;
-                        ">Batafsil ma'lumot</a>
-                    </div>
+        overlay.innerHTML = `
+            <div style="background: white; width: 90%; max-width: 400px; border-radius: 20px; overflow: hidden; position: relative; text-align: center;">
+                <div id="close-timer" style="position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.6); color: white; width: 30px; height: 30px; line-height: 30px; border-radius: 50%; font-size: 14px; font-weight: bold;">
+                    ${seconds}
                 </div>
-            `;
+                <img src="${ad.image}" style="width: 100%; height: 250px; object-fit: cover;">
+                <div style="padding: 20px;">
+                    <h2 style="margin: 0 0 10px 0; font-size: 20px;">${ad.title}</h2>
+                    <a href="${ad.url}" target="_blank" id="inter-click-btn" style="display: block; background: #0088cc; color: white; padding: 12px; text-decoration: none; border-radius: 10px; font-weight: bold; margin-bottom: 10px;">Batafsil ko'rish</a>
+                </div>
+            </div>
+        `;
 
-            // 4. Statistikani yangilash (View va Balans)
-            this.trackImpression(randomId);
+        document.body.appendChild(overlay);
 
-            // Clickni kuzatish
-            document.getElementById('ad-cta-btn').addEventListener('click', () => {
-                this.trackClick(randomId);
-            });
+        // Taymer mantiqi
+        let timeLeft = seconds;
+        const timerElem = document.getElementById('close-timer');
+        const interval = setInterval(() => {
+            timeLeft--;
+            timerElem.innerText = timeLeft;
+            if (timeLeft <= 0) {
+                clearInterval(interval);
+                timerElem.innerHTML = '✕';
+                timerElem.style.cursor = 'pointer';
+                timerElem.onclick = () => overlay.remove();
+            }
+        }, 1000);
 
-        } catch (error) {
-            console.error("AdsGram xatolik:", error);
-        }
+        // Statistikani yangilash
+        this.trackImpression(randomId);
+        document.getElementById('inter-click-btn').onclick = () => this.trackClick(randomId);
     }
 
     async trackImpression(adId) {
         const updates = {};
-        // Reklama beruvchidan $0.01 yechish
         updates[`ads/${adId}/budget`] = increment(-0.01);
         updates[`ads/${adId}/views`] = increment(1);
-        
-        // Nashriyotchi balansiga $0.007 qo'shish
         updates[`publishers/${this.publisherId}/balance`] = increment(0.007);
-        
         await update(ref(db), updates);
     }
 
     async trackClick(adId) {
-        await update(ref(db, `ads/${adId}`), {
-            clicks: increment(1)
-        });
+        await update(ref(db, `ads/${adId}`), { clicks: increment(1) });
     }
 }
 
-// Global ob'ekt sifatida eksport qilish
 window.AdsGram = new AdsGramSDK();
